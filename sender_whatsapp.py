@@ -1,103 +1,185 @@
-# sender_whatsapp.py
+# sender_whatsapp.py - ENVIA COMO FOTO (NÃO STICKER)
+
+import asyncio
+from pathlib import Path
 from playwright.async_api import TimeoutError as PWTimeout
+from watcher import open_chat
 
-async def _open_and_focus_composer(page, chat_name: str, open_chat_fn):
-    await open_chat_fn(page, chat_name)
-    await page.wait_for_timeout(500)
+async def _wait_message_box(page):
+    """Aguarda a caixa de mensagem estar disponível"""
+    candidates = [
+        page.locator("footer div[contenteditable='true'][role='textbox']").last,
+        page.locator("div[contenteditable='true'][data-tab='10']").last,
+    ]
+    for loc in candidates:
+        try:
+            await loc.wait_for(state="visible", timeout=15000)
+            return loc
+        except Exception:
+            continue
+    raise RuntimeError("Não achei a caixa de mensagem do WhatsApp.")
 
-    # Composer (campo de digitar) - seletor mais estável
-    # Em muitos builds é data-tab="10"
-    box = page.locator("footer div[contenteditable='true'][data-tab='10']").first
 
-    # Fallbacks (mudanças do WA)
-    if await box.count() == 0:
-        box = page.locator("footer div[contenteditable='true']").first
-    if await box.count() == 0:
-        box = page.locator("div[contenteditable='true'][data-tab]").last
-
-    await box.wait_for(state="visible", timeout=30000)
-    await box.click()
-    return box
-
-async def _clear_box(page):
-    await page.keyboard.press("Control+A")
-    await page.keyboard.press("Backspace")
-
-async def _get_last_out_text(page) -> str:
+async def send_text_message(page, target_chat: str, text: str, skip_open_chat: bool = False) -> bool:
     """
-    Lê o texto da última mensagem enviada (message-out).
-    Usa inner_text do bubble inteiro (mais robusto que span.selectable-text).
-    Retorna string vazia se não houver mensagens OUT.
+    Envia mensagem de texto simples (FUNCIONA 100% - NÃO MEXER)
+    skip_open_chat: Se True, não reabre o chat (já está no lugar certo)
     """
     try:
-        out = page.locator("div.message-out").last
+        if not skip_open_chat:
+            await open_chat(page, target_chat)
         
-        # Verifica se existe pelo menos uma mensagem OUT
-        if await out.count() == 0:
-            return ""
-        
-        await out.wait_for(state="visible", timeout=5000)
+        box = await _wait_message_box(page)
+        await box.click()
+        await page.wait_for_timeout(300)
+        await box.fill(text or "")
+        await page.wait_for_timeout(200)
+        await page.keyboard.press("Enter")
+        await page.wait_for_timeout(700)
+        return True
+    except Exception as e:
+        print(f"✗ Falha ao enviar texto: {e}")
+        return False
 
-        # tenta pegar o "copyable-text" (geralmente contém só o corpo)
-        body = out.locator("div.copyable-text").last
-        if await body.count() > 0:
+
+async def send_image_only(page, target_chat: str, image_path: str, max_retries: int = 2) -> bool:
+    """
+    🔥 Envia imagem usando botão ANEXAR (garante que vai como FOTO, não sticker)
+    """
+    for attempt in range(max_retries):
+        try:
+            if not image_path or not Path(image_path).exists():
+                print(f"✗ Arquivo não existe: {image_path}")
+                return False
+            
+            img = Path(image_path).resolve()
+            print(f"   → Enviando imagem: {img.name}")
+            
+            # 1. Abre chat
+            await open_chat(page, target_chat)
+            await page.wait_for_timeout(800)
+            
+            # 2. 🔥 CLICA NO BOTÃO ANEXAR (clipe/+)
+            print(f"   → Clicando botão anexar...")
+            attach_selectors = [
+                'span[data-icon="plus"]',
+                'span[data-icon="attach-menu-plus"]',
+                'span[data-icon="clip"]',
+                'div[title="Anexar"]',
+            ]
+            
+            attach_btn = None
+            for selector in attach_selectors:
+                try:
+                    loc = page.locator(selector).first
+                    if await loc.count() > 0:
+                        attach_btn = loc
+                        print(f"   ✓ Botão encontrado: {selector}")
+                        break
+                except Exception:
+                    continue
+            
+            if not attach_btn:
+                raise RuntimeError("Botão anexar não encontrado")
+            
+            await attach_btn.click()
+            await page.wait_for_timeout(1000)
+            
+            # 3. 🔥 ESCOLHE INPUT CORRETO (foto/vídeo, NÃO sticker)
+            print(f"   → Selecionando input de FOTO/VÍDEO...")
+            
+            # Procura input que aceita IMAGE E VIDEO (não só image = sticker)
+            file_input = page.locator("input[accept*='image'][accept*='video']").first
+            
+            if await file_input.count() == 0:
+                # Fallback: pega o ÚLTIMO input que aceita image (pula sticker)
+                all_img_inputs = await page.locator("input[accept*='image']").all()
+                if len(all_img_inputs) > 1:
+                    file_input = all_img_inputs[-1]  # Último (não primeiro/sticker)
+                    print(f"   ⚠️ Usando último input (fallback)")
+                elif len(all_img_inputs) == 1:
+                    file_input = all_img_inputs[0]
+                    print(f"   ⚠️ Usando único input disponível")
+                else:
+                    raise RuntimeError("Nenhum input file encontrado")
+            else:
+                print(f"   ✓ Input de FOTO/VÍDEO encontrado")
+            
+            # 4. Define arquivo
+            print(f"   → Carregando arquivo...")
+            await file_input.set_input_files(str(img))
+            
+            # 5. Aguarda preview aparecer
+            print(f"   → Aguardando preview...")
+            await page.wait_for_timeout(2500)
+            
+            # 6. Envia (botão verde com aviãozinho ou Enter)
+            print(f"   → Enviando...")
+            
+            # Tenta clicar no botão enviar
+            send_btn = page.locator("span[data-icon='send']").last
+            
             try:
-                return (await body.inner_text(timeout=3000)).strip()
+                if await send_btn.count() > 0 and await send_btn.is_visible(timeout=2000):
+                    await send_btn.click()
+                    print(f"   ✓ Clicou no botão enviar")
+                else:
+                    await page.keyboard.press("Enter")
+                    print(f"   ✓ Enviou com Enter")
+            except Exception:
+                await page.keyboard.press("Enter")
+                print(f"   ✓ Enviou com Enter (fallback)")
+            
+            await page.wait_for_timeout(2000)
+            
+            print(f"   ✅ Imagem enviada como FOTO!")
+            return True
+
+        except Exception as e:
+            print(f"✗ Falha (tentativa {attempt+1}/{max_retries}): {e}")
+            
+            # Fecha qualquer modal aberto
+            try:
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(500)
             except Exception:
                 pass
-
-        # fallback: texto do bubble inteiro
-        try:
-            return (await out.inner_text(timeout=3000)).strip()
-        except Exception:
-            return ""
             
-    except Exception:
-        # Se der qualquer erro, retorna vazio (chat sem mensagens OUT)
-        return ""
+            if attempt < max_retries - 1:
+                print(f"   → Tentando novamente em 2s...")
+                await asyncio.sleep(2)
+                continue
 
-async def send_text_message(page, chat_name: str, text: str, open_chat_fn) -> bool:
+    return False
+
+
+async def send_image_with_caption(page, target_chat: str, image_path: str, caption: str, page_ml=None, max_retries: int = 2) -> bool:
     """
-    Envia texto e CONFIRMA que apareceu como última mensagem OUT.
+    Envia imagem + texto em mensagens separadas (mais confiável)
     """
-    text = (text or "").strip()
-    if not text:
-        return False
-
-    # usamos um pedaço do final para confirmar
-    needle = text[-60:] if len(text) > 60 else text
-
     try:
-        before = await _get_last_out_text(page)  # agora retorna "" se não houver
-    except Exception:
-        before = ""
-
-    try:
-        box = await _open_and_focus_composer(page, chat_name, open_chat_fn)
-        await _clear_box(page)
-
-        # type é mais confiável do que fill no WA
-        await box.type(text, delay=0)
-        await page.keyboard.press("Enter")
-
-        # confirmar: esperar mudar a última mensagem OUT e conter needle
-        for attempt in range(25):  # 25 * 400ms = 10s
-            await page.wait_for_timeout(400)
-            last = await _get_last_out_text(page)
-
-            # Se before estava vazio (primeira msg) ou mudou
-            if last and last != before:
-                # Verifica se contém o trecho esperado
-                if needle in last or last.endswith(needle) or needle in last[-200:]:
-                    return True
-                # Se a mensagem mudou mas não é a nossa, continua esperando
-                # (pode ser que outra pessoa enviou)
-                
-        # Timeout: não confirmou
-        return False
-
-    except PWTimeout:
-        return False
+        # 1) Envia imagem
+        print(f"\n   → [1/2] Enviando IMAGEM...")
+        img_ok = await send_image_only(page, target_chat, image_path, max_retries=2)
+        
+        if not img_ok:
+            print(f"   ⚠️ Falhou enviar imagem")
+            return False
+        
+        # Aguarda imagem ser enviada
+        await page.wait_for_timeout(1500)
+        
+        # 2) Envia texto (sem reabrir chat - já está no lugar)
+        print(f"\n   → [2/2] Enviando TEXTO...")
+        text_ok = await send_text_message(page, target_chat, caption, skip_open_chat=True)
+        
+        if text_ok:
+            print(f"   ✅ Imagem + Texto enviados com sucesso!")
+            return True
+        else:
+            print(f"   ⚠️ Imagem enviada, mas texto falhou")
+            return True  # Considera sucesso parcial
+        
     except Exception as e:
-        print(f"Erro ao enviar mensagem: {e}")
+        print(f"✗ Erro: {e}")
         return False

@@ -1,20 +1,33 @@
 # extractor.py
+
 import re
 
+ML_SEC_RE = re.compile(
+    r"(https?://[\w.-]*mercadolivre\.com(?:\.br)?/sec/[A-Za-z0-9]+)",
+    re.IGNORECASE,
+)
+
 URL_RE = re.compile(r"https?://[^\s)>\]]+", re.IGNORECASE)
+
+def cut_text_after_first_meli_link(text: str) -> str:
+    if not text:
+        return ""
+    m = ML_SEC_RE.search(text)
+    if not m:
+        return text.strip()
+    end = m.end(1)
+    return text[:end].rstrip()
 
 def extract_urls_from_text(text: str) -> list[str]:
     if not text:
         return []
     urls = URL_RE.findall(text)
-    # limpa pontuação final comum
-    cleaned = []
+    cleaned: list[str] = []
     for u in urls:
-        u2 = u.rstrip(".,;:!?)\"]'")
+        u2 = u.rstrip(".,;:!?)]\\'\"")
         cleaned.append(u2)
-    # unique mantendo ordem
     seen = set()
-    out = []
+    out: list[str] = []
     for u in cleaned:
         if u not in seen:
             seen.add(u)
@@ -26,8 +39,10 @@ def replace_urls_in_text(text: str, mapping: dict[str, str]) -> str:
         return text or ""
 
     def repl(m: re.Match):
-        u = m.group(0).rstrip(".,;:!?)\"]'")
-        return mapping.get(u, u)
+        original = m.group(0)
+        url_clean = original.rstrip(".,;:!?)]\\'\"")
+        punct = original[len(url_clean):]
+        new_url = mapping.get(url_clean, url_clean)
+        return new_url + punct
 
-    # substitui por regex (mantém resto do texto)
     return URL_RE.sub(repl, text)
