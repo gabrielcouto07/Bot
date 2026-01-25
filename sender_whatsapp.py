@@ -1,9 +1,12 @@
-# sender_whatsapp.py - ENVIA COMO FOTO (NÃO STICKER)
+# sender_whatsapp.py - VERSÃO CORRIGIDA COM ANEXO REFORÇADO
 
 import asyncio
 from pathlib import Path
+
 from playwright.async_api import TimeoutError as PWTimeout
+
 from watcher import open_chat
+
 
 async def _wait_message_box(page):
     """Aguarda a caixa de mensagem estar disponível"""
@@ -11,175 +14,328 @@ async def _wait_message_box(page):
         page.locator("footer div[contenteditable='true'][role='textbox']").last,
         page.locator("div[contenteditable='true'][data-tab='10']").last,
     ]
+
     for loc in candidates:
         try:
             await loc.wait_for(state="visible", timeout=15000)
             return loc
         except Exception:
             continue
+
     raise RuntimeError("Não achei a caixa de mensagem do WhatsApp.")
 
 
 async def send_text_message(page, target_chat: str, text: str, skip_open_chat: bool = False) -> bool:
-    """
-    Envia mensagem de texto simples (FUNCIONA 100% - NÃO MEXER)
-    skip_open_chat: Se True, não reabre o chat (já está no lugar certo)
-    """
+    """Envia texto COM formatação (*negrito*, emojis)"""
     try:
         if not skip_open_chat:
             await open_chat(page, target_chat)
-        
+
         box = await _wait_message_box(page)
         await box.click()
         await page.wait_for_timeout(300)
-        await box.fill(text or "")
+
+        await box.press("Control+A")
+        await box.press("Backspace")
+        await page.wait_for_timeout(100)
+
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if line:
+                await box.type(line, delay=0)
+            if i < len(lines) - 1:
+                await box.press("Shift+Enter")
+                await page.wait_for_timeout(30)
+
         await page.wait_for_timeout(200)
         await page.keyboard.press("Enter")
         await page.wait_for_timeout(700)
+
         return True
+
     except Exception as e:
         print(f"✗ Falha ao enviar texto: {e}")
         return False
 
 
-async def send_image_only(page, target_chat: str, image_path: str, max_retries: int = 2) -> bool:
+async def _type_with_line_breaks(locator_or_page, text: str, delay: int = 10):
+    """Digita texto convertendo \\n em Shift+Enter"""
+    lines = text.split("\n")
+
+    for i, line in enumerate(lines):
+        if line:
+            await locator_or_page.type(line, delay=delay)
+        if i < len(lines) - 1:
+            await locator_or_page.press("Shift+Enter")
+            if hasattr(locator_or_page, "page"):
+                await locator_or_page.page.wait_for_timeout(50)
+            else:
+                await asyncio.sleep(0.05)
+
+
+async def send_image_with_caption(
+    page,
+    target_chat: str,
+    image_path: str,
+    caption: str,
+    page_ml=None,
+    max_retries: int = 3,
+) -> bool:
     """
-    🔥 Envia imagem usando botão ANEXAR (garante que vai como FOTO, não sticker)
+    🔥 Imagem + Legenda em 1 bolha - VERSÃO REFORÇADA
     """
     for attempt in range(max_retries):
         try:
             if not image_path or not Path(image_path).exists():
                 print(f"✗ Arquivo não existe: {image_path}")
                 return False
-            
+
             img = Path(image_path).resolve()
-            print(f"   → Enviando imagem: {img.name}")
-            
-            # 1. Abre chat
+            print(f"\n🔥 [{attempt+1}/{max_retries}] Enviando imagem + legenda")
+            print(f" → {img.name}")
+            print(f" → {len(caption)} chars ({caption.count(chr(10))} quebras)")
+
             await open_chat(page, target_chat)
-            await page.wait_for_timeout(800)
+            await page.wait_for_timeout(1500)
+
+            # ============================================
+            # [1/4] CLICAR NO BOTÃO ANEXAR (REFORÇADO)
+            # ============================================
+            print(" [1/4] Procurando botão Anexar...")
             
-            # 2. 🔥 CLICA NO BOTÃO ANEXAR (clipe/+)
-            print(f"   → Clicando botão anexar...")
             attach_selectors = [
+                'div[title="Anexar"]',
+                'button[aria-label="Anexar"]',
                 'span[data-icon="plus"]',
                 'span[data-icon="attach-menu-plus"]',
-                'span[data-icon="clip"]',
-                'div[title="Anexar"]',
+                'div[aria-label="Anexar"]',
+                'button[title="Anexar"]',
+                'div[role="button"]:has(span[data-icon="plus"])',
             ]
             
-            attach_btn = None
-            for selector in attach_selectors:
+            attach_clicked = False
+            
+            for sel in attach_selectors:
                 try:
-                    loc = page.locator(selector).first
-                    if await loc.count() > 0:
-                        attach_btn = loc
-                        print(f"   ✓ Botão encontrado: {selector}")
+                    attach = page.locator(sel).first
+                    if await attach.count() > 0:
+                        await attach.click(timeout=3000)
+                        await page.wait_for_timeout(1500)
+                        print(f" ✓ Clicou em Anexar ({sel})")
+                        attach_clicked = True
                         break
                 except Exception:
                     continue
             
-            if not attach_btn:
-                raise RuntimeError("Botão anexar não encontrado")
+            if not attach_clicked:
+                print(" ✗ Botão Anexar não encontrado!")
+                raise RuntimeError("Botão Anexar não encontrado")
+
+            # ============================================
+            # [2/4] CLICAR EM "FOTOS E VÍDEOS" (REFORÇADO)
+            # ============================================
+            print(" [2/4] Procurando 'Fotos e vídeos'...")
             
-            await attach_btn.click()
-            await page.wait_for_timeout(1000)
+            photo_selectors = [
+                'button[aria-label*="Fotos"]',
+                'li[aria-label*="Fotos"]',
+                'span:text-is("Fotos e vídeos")',
+                'span:has-text("Fotos e vídeos")',
+                'input[accept="image/*,video/mp4,video/3gpp,video/quicktime"]',
+                'span[data-icon="image"]',
+                'li:has-text("Fotos e vídeos")',
+                'button:has-text("Fotos")',
+                'div[role="button"]:has-text("Fotos")',
+            ]
             
-            # 3. 🔥 ESCOLHE INPUT CORRETO (foto/vídeo, NÃO sticker)
-            print(f"   → Selecionando input de FOTO/VÍDEO...")
+            photo_clicked = False
             
-            # Procura input que aceita IMAGE E VIDEO (não só image = sticker)
-            file_input = page.locator("input[accept*='image'][accept*='video']").first
+            for sel in photo_selectors:
+                try:
+                    # Verifica se é input file
+                    if 'input[accept' in sel:
+                        file_input = page.locator(sel).first
+                        if await file_input.count() > 0:
+                            await file_input.set_files(str(img))
+                            print(f" ✓ Upload via input file")
+                            photo_clicked = True
+                            break
+                    else:
+                        # Botão normal
+                        elem = page.locator(sel).first
+                        
+                        if await elem.count() == 0:
+                            continue
+                        
+                        # Verifica se não é "Figurinhas"
+                        try:
+                            txt = await elem.inner_text(timeout=500)
+                            if txt and "figurinha" in txt.lower():
+                                continue
+                        except Exception:
+                            pass
+                        
+                        # Tenta clicar e pegar o file chooser
+                        try:
+                            async with page.expect_file_chooser(timeout=5000) as fc:
+                                await elem.click(timeout=2000)
+                            file_chooser = await fc.value
+                            await file_chooser.set_files(str(img))
+                            print(f" ✓ Upload via file chooser ({sel})")
+                            photo_clicked = True
+                            break
+                        except Exception:
+                            continue
+                            
+                except Exception as e:
+                    continue
             
-            if await file_input.count() == 0:
-                # Fallback: pega o ÚLTIMO input que aceita image (pula sticker)
-                all_img_inputs = await page.locator("input[accept*='image']").all()
-                if len(all_img_inputs) > 1:
-                    file_input = all_img_inputs[-1]  # Último (não primeiro/sticker)
-                    print(f"   ⚠️ Usando último input (fallback)")
-                elif len(all_img_inputs) == 1:
-                    file_input = all_img_inputs[0]
-                    print(f"   ⚠️ Usando único input disponível")
-                else:
-                    raise RuntimeError("Nenhum input file encontrado")
-            else:
-                print(f"   ✓ Input de FOTO/VÍDEO encontrado")
+            if not photo_clicked:
+                print(" ✗ 'Fotos e vídeos' não encontrado!")
+                raise RuntimeError("Botão 'Fotos e vídeos' não encontrado")
+
+            # ============================================
+            # [3/4] INSERIR LEGENDA COM QUEBRAS DE LINHA
+            # ============================================
+            print(" [3/4] Inserindo legenda...")
             
-            # 4. Define arquivo
-            print(f"   → Carregando arquivo...")
-            await file_input.set_input_files(str(img))
-            
-            # 5. Aguarda preview aparecer
-            print(f"   → Aguardando preview...")
             await page.wait_for_timeout(2500)
             
-            # 6. Envia (botão verde com aviãozinho ou Enter)
-            print(f"   → Enviando...")
-            
-            # Tenta clicar no botão enviar
-            send_btn = page.locator("span[data-icon='send']").last
+            caption_inserted = False
+            caption_field_used = None
             
             try:
-                if await send_btn.count() > 0 and await send_btn.is_visible(timeout=2000):
-                    await send_btn.click()
-                    print(f"   ✓ Clicou no botão enviar")
-                else:
-                    await page.keyboard.press("Enter")
-                    print(f"   ✓ Enviou com Enter")
-            except Exception:
-                await page.keyboard.press("Enter")
-                print(f"   ✓ Enviou com Enter (fallback)")
+                fields = await page.locator('[contenteditable="true"]').all()
+                print(f" → Encontrados {len(fields)} campos editáveis")
+                
+                for i in range(len(fields) - 1, max(0, len(fields) - 5), -1):
+                    field = fields[i]
+                    
+                    try:
+                        visible = await field.is_visible()
+                        if not visible:
+                            continue
+                        
+                        bbox = await field.bounding_box()
+                        if not bbox or bbox["y"] < 100:
+                            continue
+                        
+                        print(f" → Tentando campo #{i} (y={bbox['y']:.0f})")
+                        
+                        await field.click(timeout=2000)
+                        await page.wait_for_timeout(300)
+                        
+                        try:
+                            await field.press("Control+A", timeout=500)
+                            await field.press("Backspace", timeout=500)
+                            await page.wait_for_timeout(200)
+                        except Exception:
+                            pass
+                        
+                        await _type_with_line_breaks(field, caption, delay=10)
+                        await page.wait_for_timeout(1000)
+                        
+                        text_check = await field.inner_text()
+                        text_len = len(text_check.strip())
+                        
+                        if text_len > 20:
+                            print(f" ✅ Legenda inserida: {text_len} chars")
+                            caption_inserted = True
+                            caption_field_used = field
+                            break
+                        else:
+                            print(f" ⊗ Campo #{i} vazio após digitação")
+                            
+                    except Exception as e:
+                        print(f" ⊗ Campo #{i} erro: {str(e)[:40]}")
+                        continue
+                        
+            except Exception as e:
+                print(f" ⚠️ Erro ao buscar campos: {e}")
             
-            await page.wait_for_timeout(2000)
+            if not caption_inserted:
+                print(" → Tentando keyboard global...")
+                try:
+                    lines = caption.split("\n")
+                    for idx, line in enumerate(lines):
+                        if line:
+                            await page.keyboard.type(line, delay=10)
+                        if idx < len(lines) - 1:
+                            await page.keyboard.press("Shift+Enter")
+                            await page.wait_for_timeout(50)
+                    
+                    await page.wait_for_timeout(1000)
+                    print(" ✓ Legenda digitada via keyboard")
+                    caption_inserted = True
+                    
+                except Exception as e:
+                    print(f" ⚠️ Keyboard falhou: {e}")
             
-            print(f"   ✅ Imagem enviada como FOTO!")
-            return True
+            if not caption_inserted:
+                raise RuntimeError("Não conseguiu inserir legenda")
 
-        except Exception as e:
-            print(f"✗ Falha (tentativa {attempt+1}/{max_retries}): {e}")
+            # ============================================
+            # [4/4] ENVIAR
+            # ============================================
+            print(" [4/4] Enviando...")
             
-            # Fecha qualquer modal aberto
+            await page.wait_for_timeout(1000)
+            
+            sent = False
+            
+            # Tenta Enter no campo
+            if caption_field_used:
+                try:
+                    await caption_field_used.press("Enter")
+                    await page.wait_for_timeout(2500)
+                    print(" ✓ Enviado via Enter no campo")
+                    sent = True
+                except Exception as e:
+                    print(f" ⚠️ Enter no campo falhou: {e}")
+            
+            # Tenta Enter global
+            if not sent:
+                try:
+                    await page.keyboard.press("Enter")
+                    await page.wait_for_timeout(2500)
+                    print(" ✓ Enviado via Enter global")
+                    sent = True
+                except Exception as e:
+                    print(f" ⚠️ Enter global falhou: {e}")
+            
+            # Tenta clicar no botão Send
+            if not sent:
+                try:
+                    send = page.locator('span[data-icon="send"]').last
+                    await send.click(force=True, timeout=3000)
+                    await page.wait_for_timeout(2500)
+                    print(" ✓ Enviado via botão Send")
+                    sent = True
+                except Exception as e:
+                    print(f" ⚠️ Botão Send falhou: {e}")
+            
+            if not sent:
+                raise RuntimeError("Nenhum método de envio funcionou")
+            
+            print("\n ✅✅✅ SUCESSO: Imagem + Legenda enviada!\n")
+            return True
+            
+        except Exception as e:
+            print(f"\n ❌ Tentativa {attempt+1} falhou: {str(e)[:150]}\n")
+            
+            # Cancela anexo com ESC
             try:
-                await page.keyboard.press("Escape")
-                await page.wait_for_timeout(500)
+                for _ in range(5):
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(300)
             except Exception:
                 pass
             
             if attempt < max_retries - 1:
-                print(f"   → Tentando novamente em 2s...")
-                await asyncio.sleep(2)
-                continue
-
+                print(f" → Retry em 4s...\n")
+                await asyncio.sleep(4)
+            else:
+                print(" ❌ FALHA FINAL\n")
+                return False
+    
     return False
-
-
-async def send_image_with_caption(page, target_chat: str, image_path: str, caption: str, page_ml=None, max_retries: int = 2) -> bool:
-    """
-    Envia imagem + texto em mensagens separadas (mais confiável)
-    """
-    try:
-        # 1) Envia imagem
-        print(f"\n   → [1/2] Enviando IMAGEM...")
-        img_ok = await send_image_only(page, target_chat, image_path, max_retries=2)
-        
-        if not img_ok:
-            print(f"   ⚠️ Falhou enviar imagem")
-            return False
-        
-        # Aguarda imagem ser enviada
-        await page.wait_for_timeout(1500)
-        
-        # 2) Envia texto (sem reabrir chat - já está no lugar)
-        print(f"\n   → [2/2] Enviando TEXTO...")
-        text_ok = await send_text_message(page, target_chat, caption, skip_open_chat=True)
-        
-        if text_ok:
-            print(f"   ✅ Imagem + Texto enviados com sucesso!")
-            return True
-        else:
-            print(f"   ⚠️ Imagem enviada, mas texto falhou")
-            return True  # Considera sucesso parcial
-        
-    except Exception as e:
-        print(f"✗ Erro: {e}")
-        return False
