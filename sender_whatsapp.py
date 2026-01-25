@@ -153,9 +153,86 @@ async def send_image_only(page, target_chat: str, image_path: str, max_retries: 
     return False
 
 
+async def send_copied_image_with_caption(page, target_chat: str, caption: str, max_retries: int = 2) -> bool:
+    """
+    🔥 Cola imagem da área de transferência (Ctrl+V) e adiciona legenda
+    """
+    for attempt in range(max_retries):
+        try:
+            # 1. Abre o chat de destino
+            await open_chat(page, target_chat)
+            await page.wait_for_timeout(800)
+            
+            # 2. Clica na caixa de mensagem
+            box = await _wait_message_box(page)
+            await box.click()
+            await page.wait_for_timeout(300)
+            
+            # 3. 🔥 Cola a imagem (Ctrl+V)
+            print("   → Colando imagem (Ctrl+V)...")
+            await page.keyboard.press("Control+V")
+            await page.wait_for_timeout(2000)
+            
+            # 4. Aguarda preview da imagem aparecer
+            print("   → Aguardando preview...")
+            await page.wait_for_timeout(1500)
+            
+            # 5. Adiciona legenda se tiver
+            if caption and caption.strip():
+                print(f"   → Adicionando legenda ({len(caption)} chars)...")
+                # Procura a caixa de legenda no preview
+                caption_box = page.locator("div[contenteditable='true'][data-tab='10']").last
+                
+                try:
+                    await caption_box.wait_for(state="visible", timeout=3000)
+                    await caption_box.click()
+                    await page.wait_for_timeout(200)
+                    await caption_box.fill(caption)
+                    await page.wait_for_timeout(500)
+                except Exception as e:
+                    print(f"   ⚠️ Erro ao adicionar legenda: {e}")
+            
+            # 6. 🔥 Envia (botão verde ou Enter)
+            print("   → Enviando...")
+            send_btn = page.locator("span[data-icon='send']").last
+            
+            try:
+                if await send_btn.count() > 0 and await send_btn.is_visible(timeout=2000):
+                    await send_btn.click()
+                    print("   ✓ Clicou no botão enviar")
+                else:
+                    await page.keyboard.press("Enter")
+                    print("   ✓ Enviou com Enter")
+            except Exception:
+                await page.keyboard.press("Enter")
+                print("   ✓ Enviou com Enter (fallback)")
+            
+            await page.wait_for_timeout(2000)
+            print("   ✅ Imagem + Legenda enviadas com Ctrl+V!")
+            return True
+            
+        except Exception as e:
+            print(f"✗ Falha ao colar imagem (tentativa {attempt+1}/{max_retries}): {e}")
+            
+            # Fecha qualquer modal
+            try:
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(500)
+            except Exception:
+                pass
+            
+            if attempt < max_retries - 1:
+                print("   → Tentando novamente em 2s...")
+                await asyncio.sleep(2)
+                continue
+    
+    return False
+
+
 async def send_image_with_caption(page, target_chat: str, image_path: str, caption: str, page_ml=None, max_retries: int = 2) -> bool:
     """
     Envia imagem + texto em mensagens separadas (mais confiável)
+    FALLBACK - usa arquivo ao invés de Ctrl+V
     """
     try:
         # 1) Envia imagem

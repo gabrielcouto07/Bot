@@ -1,0 +1,5 @@
+# Bot WhatsApp - Afiliados Multi-Plataforma
+# Instalação: pip install -r requirements.txt
+
+playwright>=1.40.0
+asyncio

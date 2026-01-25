@@ -40,11 +40,31 @@ async def open_chat(page, chat_name: str):
 
 
 async def get_last_message_bubble(page):
+    """🔥 GARANTE que pega a ÚLTIMA mensagem (mais recente) do chat"""
+    # Espera um pouco para garantir que a página carregou
+    await page.wait_for_timeout(300)
+    
+    # Pega TODAS as mensagens (recebidas e enviadas)
     msgs = page.locator("div.message-in, div.message-out")
     n = await msgs.count()
+    
     if n == 0:
+        print("   ⚠️ Nenhuma mensagem encontrada no chat")
         return None
-    return msgs.nth(n - 1)
+    
+    # Retorna a ÚLTIMA mensagem (índice n-1)
+    # n-1 = última mensagem
+    # n-2 = penúltima, etc
+    last_msg = msgs.nth(n - 1)
+    
+    # Log para debug
+    try:
+        msg_text_preview = await last_msg.inner_text()
+        print(f"   📌 Última mensagem (total: {n}): {msg_text_preview[:50]}...")
+    except Exception:
+        pass
+    
+    return last_msg
 
 
 async def has_image(bubble) -> bool:
@@ -131,8 +151,59 @@ async def extract_last_message_text_and_urls(page) -> tuple[str, list[str]]:
     return text, urls
 
 
+async def copy_last_image(page, max_retries: int = 2) -> bool:
+    """Copia a imagem da última mensagem usando Ctrl+C"""
+    last = await get_last_message_bubble(page)
+    if last is None:
+        return False
+
+    for attempt in range(max_retries):
+        try:
+            thumb = last.locator("img[src^='blob:']").first
+            if await thumb.count() == 0:
+                thumb = last.locator("img[src]").first
+            if await thumb.count() == 0:
+                return False
+
+            try:
+                await thumb.scroll_into_view_if_needed(timeout=2000)
+            except Exception:
+                pass
+
+            # Clica na imagem para abrir visualizador
+            await thumb.click(timeout=4000, force=True)
+            await page.wait_for_timeout(1200)
+
+            # Copia com Ctrl+C
+            print("   → Copiando imagem (Ctrl+C)...")
+            await page.keyboard.press("Control+C")
+            await page.wait_for_timeout(800)
+
+            # Fecha o visualizador
+            try:
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(300)
+            except Exception:
+                pass
+
+            print("   ✓ Imagem copiada para área de transferência")
+            return True
+
+        except Exception as e:
+            print(f"   ⚠️ Erro ao copiar imagem (tentativa {attempt+1}/{max_retries}): {e}")
+            try:
+                await page.keyboard.press("Escape")
+            except Exception:
+                pass
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1)
+                continue
+
+    return False
+
+
 async def screenshot_last_image(page, out_dir: str, max_retries: int = 2) -> str | None:
-    """Fallback"""
+    """Fallback - ainda mantém para compatibilidade"""
     last = await get_last_message_bubble(page)
     if last is None:
         return None
