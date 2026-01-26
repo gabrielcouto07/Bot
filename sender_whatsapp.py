@@ -3,7 +3,7 @@
 import asyncio
 from pathlib import Path
 
-from config import MY_GROUP_LINK
+from config_example import GROUP_LINKS
 from playwright.async_api import TimeoutError as PWTimeout
 
 from watcher import open_chat
@@ -26,7 +26,7 @@ async def _wait_message_box(page):
     raise RuntimeError("Não achei a caixa de mensagem do WhatsApp.")
 
 
-async def send_text_message(page, target_chat: str, text: str, skip_open_chat: bool = False) -> bool:
+async def send_text_message(page, target_chat: str, text: str, target_group: str = None, skip_open_chat: bool = False) -> bool:
     """Envia texto COM formatação (*negrito*, emojis)"""
     try:
         if not skip_open_chat:
@@ -34,26 +34,30 @@ async def send_text_message(page, target_chat: str, text: str, skip_open_chat: b
 
         box = await _wait_message_box(page)
         await box.click()
-        await page.wait_for_timeout(300)
+        await page.wait_for_timeout(200)  # ⚡ Reduzido de 300ms
 
         await box.press("Control+A")
         await box.press("Backspace")
-        await page.wait_for_timeout(100)
+        await page.wait_for_timeout(80)  # ⚡ Reduzido de 100ms
 
         # Adiciona link do grupo no final da mensagem
-        full_text = f"{text}\n\n☑️ Link do grupo: {MY_GROUP_LINK}"
+        group_link = GROUP_LINKS.get(target_group, "")  # Pega o link correto do target group
+        if group_link:
+            full_text = f"{text}\n\n☑️ Link do grupo: {group_link}"
+        else:
+            full_text = text
         
         lines = full_text.split("\n")
         for i, line in enumerate(lines):
             if line:
-                await box.type(line, delay=0)
+                await box.type(line, delay=2)  # ⚡ Reduzido de 10 para 2ms
             if i < len(lines) - 1:
                 await box.press("Shift+Enter")
-                await page.wait_for_timeout(30)
+                await page.wait_for_timeout(15)  # ⚡ Reduzido de 30ms
 
-        await page.wait_for_timeout(200)
+        await page.wait_for_timeout(100)  # ⚡ Reduzido de 200ms
         await page.keyboard.press("Enter")
-        await page.wait_for_timeout(700)
+        await page.wait_for_timeout(500)  # ⚡ Reduzido de 700ms
 
         return True
 
@@ -62,7 +66,7 @@ async def send_text_message(page, target_chat: str, text: str, skip_open_chat: b
         return False
 
 
-async def _type_with_line_breaks(locator_or_page, text: str, delay: int = 10):
+async def _type_with_line_breaks(locator_or_page, text: str, delay: int = 5):  # ⚡ Reduzido de 10
     """Digita texto convertendo \\n em Shift+Enter"""
     lines = text.split("\n")
 
@@ -72,9 +76,9 @@ async def _type_with_line_breaks(locator_or_page, text: str, delay: int = 10):
         if i < len(lines) - 1:
             await locator_or_page.press("Shift+Enter")
             if hasattr(locator_or_page, "page"):
-                await locator_or_page.page.wait_for_timeout(50)
+                await locator_or_page.page.wait_for_timeout(25)  # ⚡ Reduzido de 50ms
             else:
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.025)
 
 
 async def send_image_with_caption(
@@ -82,6 +86,7 @@ async def send_image_with_caption(
     target_chat: str,
     image_path: str,
     caption: str,
+    target_group: str = None,
     page_ml=None,
     max_retries: int = 3,
 ) -> bool:
@@ -103,7 +108,11 @@ async def send_image_with_caption(
             await page.wait_for_timeout(1500)
 
             # Adiciona link do grupo no final da legenda
-            full_caption = f"{caption}\n\n☑️ Link do grupo: {MY_GROUP_LINK}"
+            group_link = GROUP_LINKS.get(target_group, "")  # Pega o link correto do target group
+            if group_link:
+                full_caption = f"{caption}\n\n☑️ Link do grupo: {group_link}"
+            else:
+                full_caption = caption
 
             # ============================================
             # [1/4] CLICAR NO BOTÃO ANEXAR (REFORÇADO)

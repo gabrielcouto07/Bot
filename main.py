@@ -5,12 +5,13 @@ import traceback
 import random
 import os
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-from config import (
+from config_example import (
     CHANNEL_PAIRS,
     POLL_SECONDS,
     DOWNLOAD_DIR,
@@ -107,13 +108,11 @@ async def wait_whatsapp_logged(page_w):
 
 
 def _filter_meli_sec(urls: list[str]) -> list[str]:
-    """Filtra apenas links /sec/ do Mercado Livre"""
-    out = []
-    for u in urls or []:
-        low = (u or "").lower()
-        if "mercadolivre" in low and "/sec/" in low:
-            out.append(u)
-    return out
+    """Filtra apenas links /sec/ do Mercado Livre (otimizado com regex)"""
+    if not urls:
+        return []
+    meli_sec_pattern = re.compile(r'mercadolivre.*?/sec/', re.IGNORECASE)
+    return [u for u in urls if u and meli_sec_pattern.search(u)]
 
 
 def _cleanup_temp_images(download_dir: str):
@@ -195,29 +194,44 @@ async def process_new_message(
         logger.info(f">> [{source_name}] Mensagem tem IMAGEM")
 
         if product_url:
-            logger.info(f"   → Baixando imagem de: {product_url[:60]}...")
-            img_path = await download_product_image(page_m, product_url, DOWNLOAD_DIR)
+            logger.info(f"   → Tentando baixar de: {product_url[:60]}...")
+            # 🚀 Paralelizar: baixar ML E screenshot simultaneamente com timeout
+            tasks = [
+                asyncio.create_task(download_product_image(page_m, product_url, DOWNLOAD_DIR)),
+                asyncio.create_task(screenshot_last_image(page_w, DOWNLOAD_DIR)),
+            ]
+            done, pending = await asyncio.wait(tasks, timeout=8, return_when=asyncio.FIRST_COMPLETED)
+            
+            for task in done:
+                result = await task
+                if result:
+                    img_path = result
+                    break
+            
+            # Cancelar tasks pendentes
+            for task in pending:
+                task.cancel()
 
         if not img_path:
-            logger.warning("   ⚠️ Falhou baixar do ML, tentando WhatsApp...")
+            logger.warning("   ⚠️ Falhou em ambas, tentando screenshot direto...")
             img_path = await screenshot_last_image(page_w, DOWNLOAD_DIR)
 
         if img_path:
             logger.info(f"   ✓ Imagem salva: {img_path}")
 
     await page_w.bring_to_front()
-    await page_w.wait_for_timeout(800)
+    await page_w.wait_for_timeout(300)  # ⚡ Reduzido de 800ms
 
     logger.info(f">> [{source_name}] Enviando para: {target_name}")
     ok = False
 
     if img_path and new_text.strip():
-        ok = await send_image_with_caption(page_w, target_name, img_path, new_text)
+        ok = await send_image_with_caption(page_w, target_name, img_path, new_text, target_group=target_name)
         if not ok:
             logger.warning("   ⚠️ Falhou enviar imagem, tentando só texto...")
-            ok = await send_text_message(page_w, target_name, new_text)
+            ok = await send_text_message(page_w, target_name, new_text, target_group=target_name)
     elif new_text.strip():
-        ok = await send_text_message(page_w, target_name, new_text)
+        ok = await send_text_message(page_w, target_name, new_text, target_group=target_name)
     else:
         logger.error(f"❌ [{source_name}] Sem conteúdo para enviar!")
         ok = False
@@ -268,83 +282,86 @@ async def monitoring_loop(page_w, page_m):
         else:
             logger.info("   Último ID: nenhum (primeira execução)")
 
-    logger.info(f"⏱️ Ciclo: {POLL_SECONDS}s por grupo")
+    logger.info(f"⏱️ Ciclo: Verificar todos os grupos uma vez, depois pausar 5 minutos")
     logger.info("💾 Estado: state_last_seen.txt")
     logger.info("=" * 80 + "\n")
 
-    current_index = 0
-
     while True:
         try:
-            source_group, target_group, description = CHANNEL_PAIRS[
-                current_index
-            ]
-
-            logger.info(f"\n🔍 [{description}] Verificando: {source_group}...")
-
-            await open_chat(page_w, source_group)
-            await page_w.wait_for_timeout(800)
-
-            text, hrefs = await extract_last_message_text_and_urls(page_w)
-
-            if text or hrefs:
-                msg_id = compute_msg_id(text, hrefs)
-
-                if msg_id != last_seen_dict.get(source_group):
-                    logger.info("\n" + "─" * 70)
-                    logger.info(
-                        f"📨 [{source_group}] NOVA MENSAGEM DETECTADA!"
-                    )
-                    logger.info("─" * 70)
-                    logger.info(f"ID atual: {msg_id[:16]}...")
-
-                    if last_seen_dict.get(source_group):
-                        logger.info(
-                            f"ID anterior: {last_seen_dict[source_group][:16]}..."
-                        )
-                    else:
-                        logger.info("ID anterior: nenhum")
-
-                    preview = text[:100] if text else ""
-                    if len(text) > 100:
-                        preview += "..."
-                    logger.info(f"Texto ({len(text)} chars): {preview}")
-
-                    ok = await process_new_message(
-                        page_w,
-                        page_m,
-                        text,
-                        hrefs,
-                        source_group,
-                        target_group,
-                    )
-
-                    if ok:
-                        last_seen_dict[source_group] = msg_id
-                        preview_short = text[:50] if text else ""
-                        save_last_seen(msg_id, source_group, preview_short)
-                        logger.info(
-                            f"✅ [{source_group}] ID salvo - mensagem NÃO será reprocessada"
-                        )
-                    else:
-                        logger.warning(
-                            f"⚠️ [{source_group}] Mensagem não enviada - ID NÃO foi salvo (tentará novamente)"
-                        )
+            # ✅ Verificar TODOS os grupos uma vez
+            for source_group, target_group, description in CHANNEL_PAIRS:
+                try:
+                    logger.info(f"\n🔍 [{description}] Verificando: {source_group}...")
 
                     await open_chat(page_w, source_group)
-                else:
-                    logger.info("   ✓ Sem novas mensagens (ID já processado)")
-            else:
-                logger.info("   ✓ Sem mensagens no grupo")
+                    await page_w.wait_for_timeout(300)
 
-            current_index = (current_index + 1) % len(CHANNEL_PAIRS)
+                    text, hrefs = await extract_last_message_text_and_urls(page_w)
+
+                    if text or hrefs:
+                        msg_id = compute_msg_id(text, hrefs)
+
+                        if msg_id != last_seen_dict.get(source_group):
+                            logger.info("\n" + "─" * 70)
+                            logger.info(
+                                f"📨 [{source_group}] NOVA MENSAGEM DETECTADA!"
+                            )
+                            logger.info("─" * 70)
+                            logger.info(f"ID atual: {msg_id[:16]}...")
+
+                            if last_seen_dict.get(source_group):
+                                logger.info(
+                                    f"ID anterior: {last_seen_dict[source_group][:16]}..."
+                                )
+                            else:
+                                logger.info("ID anterior: nenhum")
+
+                            preview = text[:100] if text else ""
+                            if len(text) > 100:
+                                preview += "..."
+                            logger.info(f"Texto ({len(text)} chars): {preview}")
+
+                            ok = await process_new_message(
+                                page_w,
+                                page_m,
+                                text,
+                                hrefs,
+                                source_group,
+                                target_group,
+                            )
+
+                            if ok:
+                                last_seen_dict[source_group] = msg_id
+                                preview_short = text[:50] if text else ""
+                                save_last_seen(msg_id, source_group, preview_short)
+                                logger.info(
+                                    f"✅ [{source_group}] ID salvo - mensagem NÃO será reprocessada"
+                                )
+                            else:
+                                logger.warning(
+                                    f"⚠️ [{source_group}] Mensagem não enviada - ID NÃO foi salvo (tentará novamente)"
+                                )
+                        else:
+                            logger.info("   ✓ Sem novas mensagens (ID já processado)")
+                    else:
+                        logger.info("   ✓ Sem mensagens no grupo")
+
+                except Exception as e:
+                    logger.error(f"❌ Erro ao verificar {source_group}: {e}")
+                    logger.error(traceback.format_exc())
+
+            # ⏸️ PAUSA DE 3 MINUTOS após verificar todos os grupos
+            logger.info("\n" + "=" * 80)
+            logger.info("⏸️ Ciclo completo! Pausando por 3 minutos...")
+            logger.info("=" * 80 + "\n")
+            await asyncio.sleep(180)  # 3 minutos = 180 segundos
 
         except Exception as e:
-            logger.error(f"❌ Erro ao verificar {source_group}: {e}")
+            logger.error(f"❌ Erro no loop principal: {e}")
             logger.error(traceback.format_exc())
-            current_index = (current_index + 1) % len(CHANNEL_PAIRS)
-
-        await asyncio.sleep(POLL_SECONDS)
+            await asyncio.sleep(60)  # Espera 1 minuto antes de retry
+            logger.error(traceback.format_exc())
+            await asyncio.sleep(60)  # Espera 1 minuto antes de retry em caso de erro fatal
 
 
 async def run():
@@ -356,11 +373,18 @@ async def run():
         ctx = await p.chromium.launch_persistent_context(
             CHROME_USER_DATA_DIR,
             channel="chrome",
-            headless=HEADLESS,
+            headless=HEADLESS,  # True = invisível, False = visível
             args=[
                 f"--profile-directory={CHROME_PROFILE_DIR_NAME}",
                 "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",  # Fix para crashes
+                "--no-sandbox",  # Required para alguns servidores
+                "--disable-setuid-sandbox",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             ],
+            ignore_default_args=["--enable-automation"],  # Hide automation flag
         )
 
         page_w = ctx.pages[0] if ctx.pages else await ctx.new_page()
