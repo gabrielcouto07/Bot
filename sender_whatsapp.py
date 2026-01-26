@@ -3,6 +3,7 @@
 import asyncio
 from pathlib import Path
 
+from config import MY_GROUP_LINK
 from playwright.async_api import TimeoutError as PWTimeout
 
 from watcher import open_chat
@@ -39,7 +40,10 @@ async def send_text_message(page, target_chat: str, text: str, skip_open_chat: b
         await box.press("Backspace")
         await page.wait_for_timeout(100)
 
-        lines = text.split("\n")
+        # Adiciona link do grupo no final da mensagem
+        full_text = f"{text}\n\n☑️ Link do grupo: {MY_GROUP_LINK}"
+        
+        lines = full_text.split("\n")
         for i, line in enumerate(lines):
             if line:
                 await box.type(line, delay=0)
@@ -97,6 +101,9 @@ async def send_image_with_caption(
 
             await open_chat(page, target_chat)
             await page.wait_for_timeout(1500)
+
+            # Adiciona link do grupo no final da legenda
+            full_caption = f"{caption}\n\n☑️ Link do grupo: {MY_GROUP_LINK}"
 
             # ============================================
             # [1/4] CLICAR NO BOTÃO ANEXAR (REFORÇADO)
@@ -232,7 +239,7 @@ async def send_image_with_caption(
                         except Exception:
                             pass
                         
-                        await _type_with_line_breaks(field, caption, delay=10)
+                        await _type_with_line_breaks(field, full_caption, delay=10)
                         await page.wait_for_timeout(1000)
                         
                         text_check = await field.inner_text()
@@ -256,7 +263,7 @@ async def send_image_with_caption(
             if not caption_inserted:
                 print(" → Tentando keyboard global...")
                 try:
-                    lines = caption.split("\n")
+                    lines = full_caption.split("\n")
                     for idx, line in enumerate(lines):
                         if line:
                             await page.keyboard.type(line, delay=10)

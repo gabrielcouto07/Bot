@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Ambientes virtuais
+.venv/
+venv/
+ENV/
+env/
+
+# Logs
+logs/
+*.log
+
+# Arquivos temporários
+tmp/
+*.tmp
+*.temp
+
+# Estado e cache do bot
+state_last_seen.txt
+ml_affiliate_network_dump.json
+
+# Perfil do Chrome/navegador
+C:\BotChromeProfile/
+BotChromeProfile/
+*.crx
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Credenciais e configurações sensíveis
+.env
+*.key
+*.pem
+credentials.json
+
+# Imagens baixadas
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp

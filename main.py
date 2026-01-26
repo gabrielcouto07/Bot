@@ -32,11 +32,10 @@ from watcher import (
     screenshot_last_image,
 )
 
-from extractor import extract_urls_from_text, replace_urls_in_text
+from extractor import extract_urls_from_text, replace_urls_in_text, format_old_price_with_strikethrough
 from affiliate import generate_affiliate_link, download_product_image
 from sender_whatsapp import send_text_message, send_image_with_caption
 from storage import load_last_seen, save_last_seen
-
 
 # ====================================
 # 🔥 SISTEMA DE LOGS ESTRUTURADO
@@ -178,6 +177,8 @@ async def process_new_message(
 
     enhanced_text = process_text_enhancements(text)
     new_text = replace_urls_in_text(enhanced_text, mapping)
+
+    new_text = format_old_price_with_strikethrough(new_text)
 
     logger.info(
         f">> [{source_name}] Texto processado: {len(text)} → {len(new_text)} chars"

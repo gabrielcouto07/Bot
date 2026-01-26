@@ -5,13 +5,16 @@
 # ====================================
 # Formato: (Source Group, Target Group, Descrição)
 CHANNEL_PAIRS = [ 
-    ("Herói da Promo #731", "Super Promos", "Promoções Gerais"),
-    ("Tech Deals 🎯 [20]", "Tech Promos", "Tecnologia"),
-    ("Home Deals [12]", "Promos pra Casa", "Casa/Utilidades"),
+    ("Tech Deals 🎯 [01]", "Testes", "Teste de Funcionalidades"),
+    ("Home Deals [12]", "Testes", "Teste de Funcionalidades"),
+    ("Rafa Shop", "Testes", "Teste de Funcionalidades"),
+    ("Guerra Deals Fit [112]", "Testes", "Teste de Funcionalidades"),
+    ("Guerra Deals Fit [73]", "Testes", "Teste de Funcionalidades"),
+    ("Parfum Deals 👔 [11]", "Testes", "Teste de Funcionalidades")
 ]
 
 # Tag de afiliado Mercado Livre (CORRETA)
-MELI_AFFILIATE_TAG = "silvagabriel20230920180155"
+MELI_AFFILIATE_TAG = "np20241006154502"
 
 # Pasta para downloads
 DOWNLOAD_DIR = "./tmp"
@@ -45,3 +48,6 @@ GATILHOS = [
 
 # Chance de adicionar gatilho (0.0 a 1.0)
 GATILHO_CHANCE = 0.20
+
+# Link do grupo WhatsApp para adicionar nas mensagens
+MY_GROUP_LINK = "https://chat.whatsapp.com/LJYchTBpAQ3JZ1Bpvod4w1"
