@@ -44,6 +44,7 @@ desktop.ini
 
 # Credenciais e configurações sensíveis
 .env
+config.py
 *.key
 *.pem
 credentials.json
