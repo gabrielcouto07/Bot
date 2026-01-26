@@ -5,7 +5,6 @@ import traceback
 from playwright.async_api import async_playwright
 
 from config import (
-    SOURCE_GROUP,
     TARGET_GROUP,
     POLL_SECONDS,
     DOWNLOAD_DIR,
@@ -15,6 +14,15 @@ from config import (
     HEADLESS,
 )
 
+# Suporta modo single (SOURCE_GROUP) ou múltiplo (SOURCE_GROUPS)
+try:
+    from config import SOURCE_GROUPS
+    if not isinstance(SOURCE_GROUPS, list):
+        SOURCE_GROUPS = [SOURCE_GROUPS]
+except ImportError:
+    from config import SOURCE_GROUP
+    SOURCE_GROUPS = [SOURCE_GROUP]
+
 from watcher import (
     open_chat,
     extract_last_message_text_and_urls,
@@ -22,12 +30,19 @@ from watcher import (
     get_last_message_bubble,
     has_image,
     screenshot_last_image,
+    detect_chat_type,
 )
 
 from extractor import extract_urls_from_text, replace_urls_in_text
 from affiliate import generate_affiliate_link, download_product_image
 from sender_whatsapp import send_text_message, send_image_with_caption
-from storage import load_last_seen, save_last_seen
+from storage import (
+    load_last_seen, 
+    save_last_seen,
+    load_last_seen_multi,
+    save_last_seen_multi,
+    update_last_seen_for_source,
+)
 
 
 async def wait_whatsapp_logged(page_w):
@@ -115,50 +130,111 @@ async def process_new_message(page_w, page_m, text: str, hrefs: list[str]) -> bo
         return ok
     
     if new_text.strip():
-        print(f"\n>> Enviando TEXTO para: {TARGET_GROUP}")
-        return await send_text_message(page_w, TARGET_GROUP, new_text)
-    
-    print("⚠️ Nada para enviar (texto vazio)")
-    return False
+        prcheck_source(page_w, page_m, source_name: str, last_seen_id: str | None) -> str | None:
+    """
+    Verifica uma fonte específica (canal/grupo) por novas mensagens.
+    Retorna novo msg_id se processou com sucesso, ou None.
+    """
+    try:
+        # Abre o chat da fonte
+        await open_chat(page_w, source_name)
+        await page_w.wait_for_timeout(500)
+        
+        # Extrai última mensagem
+        text, hrefs = await extract_last_message_text_and_urls(page_w)
+        if not text and not hrefs:
+            return None
+
+        msg_id = compute_msg_id(text, hrefs)
+        
+        # Se já vimos essa mensagem, pula
+        if msg_id == last_seen_id:
+            return None
+
+        print("\n" + "─" * 62)
+        print(f"📨 NOVA MENSAGEM em: {source_name}")
+        print("─" * 62)
+        print(f"ID: {msg_id}")
+        print(f">> Texto ({len(text)} chars):\n{text}\n")
+
+        # Processa mensagem
+        ok = await process_new_message(page_w, page_m, text, hrefs)
+        
+        if ok:
+            print(f"✓ Mensagem de '{source_name}' processada com sucesso")
+            return msg_id
+        else:
+            print(f"⚠️ Falha ao processar mensagem de '{source_name}'")
+            return None
+            
+    except Exception as e:
+        print(f"❌ ERRO ao verificar '{source_name}': {e}")
+        return None
+
 
 async def monitoring_loop(page_w, page_m):
-    last_seen = load_last_seen()
-    print(f">> Último ID visto: {last_seen or 'nenhum'}")
-    print(f">> Abrindo grupo origem: {SOURCE_GROUP}")
-    await open_chat(page_w, SOURCE_GROUP)
-
+    """Monitora múltiplas fontes (canais/grupos) simultaneamente"""
+    
+    # Carrega estado (último ID visto por fonte)
+    if len(SOURCE_GROUPS) == 1:
+        # Modo compatibilidade: single source
+        last_seen = load_last_seen()
+        state = {SOURCE_GROUPS[0]: last_seen} if last_seen else {}
+    else:
+        # Modo múltiplas fontes
+        state = load_last_seen_multi()
+    
     print("\n" + "=" * 70)
-    print("🤖 BOT INICIADO - Monitorando novas mensagens...")
+    print(f"🤖 BOT INICIADO - Monitorando {len(SOURCE_GROUPS)} fonte(s):")
+    print("=" * 70)
+    
+    for i, source in enumerate(SOURCE_GROUPS, 1):
+        last_id = state.get(source, "nenhum")
+        print(f"  {i}. {source}")
+        print(f"     └─ Último ID: {last_id}")
+        
+        # Abre cada fonte uma vez para detectar tipo
+        try:
+            await open_chat(page_w, source)
+            chat_type = await detect_chat_type(page_w)
+            print(f"     └─ Tipo: {chat_type.upper()}")
+        except Exception as e:
+            print(f"     └─ ⚠️ Erro ao abrir: {e}")
+    
     print("=" * 70 + "\n")
+    print(f"🔄 Iniciando monitoramento a cada {POLL_SECONDS}s...\n")
 
     while True:
         try:
-            text, hrefs = await extract_last_message_text_and_urls(page_w)
-            if not text and not hrefs:
-                await asyncio.sleep(POLL_SECONDS)
-                continue
+            # Itera por todas as fontes
+            for source_name in SOURCE_GROUPS:
+                last_seen_id = state.get(source_name)
+                
+                # Verifica se há nova mensagem nesta fonte
+                new_id = await check_source(page_w, page_m, source_name, last_seen_id)
+                
+                # Se processou com sucesso, atualiza estado
+                if new_id:
+                    state[source_name] = new_id
+                    
+                    # Salva estado
+                    if len(SOURCE_GROUPS) == 1:
+                        save_last_seen(new_id)
+                    else:
+                        save_last_seen_multi(state)
+                    
+                    print(f"✓ Estado atualizado para '{source_name}': {new_id}")
+                
+                # Pequeno delay entre fontes
+                await asyncio.sleep(0.5)
+            
+            # Delay antes do próximo ciclo completo
+            await asyncio.sleep(POLL_SECONDS)
 
-            msg_id = compute_msg_id(text, hrefs)
-            if msg_id == last_seen:
-                await asyncio.sleep(POLL_SECONDS)
-                continue
-
-            print("\n" + "─" * 62)
-            print("📨 NOVA MENSAGEM DETECTADA!")
-            print("─" * 62)
-            print(f"ID: {msg_id}")
-            print(f">> Texto ({len(text)} chars):\n{text}\n")
-
-            ok = await process_new_message(page_w, page_m, text, hrefs)
-            if ok:
-                last_seen = msg_id
-                save_last_seen(msg_id)
-                print(f"✓ ID salvo: {msg_id}")
-            else:
-                print("⚠️ Mensagem não processada - ID não será salvo")
-
-            # Volta pro grupo origem
-            await open_chat(page_w, SOURCE_GROUP)
+        except Exception as e:
+            print(f"❌ ERRO no loop principal: {e}")
+            traceback.print_exc()
+                await open_chat(page_w, SOURCE_GROUP)
 
         except Exception as e:
             print(f"❌ ERRO no loop: {e}")
