@@ -25,7 +25,6 @@ state_last_seen.txt
 ml_affiliate_network_dump.json
 
 # Perfil do Chrome/navegador
-C:\BotChromeProfile/
 BotChromeProfile/
 *.crx
 
