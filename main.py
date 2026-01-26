@@ -11,9 +11,8 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-from config_example import (
+from config import (
     CHANNEL_PAIRS,
-    POLL_SECONDS,
     DOWNLOAD_DIR,
     MELI_AFFILIATE_TAG,
     CHROME_USER_DATA_DIR,

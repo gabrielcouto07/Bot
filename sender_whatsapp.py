@@ -3,7 +3,7 @@
 import asyncio
 from pathlib import Path
 
-from config_example import GROUP_LINKS
+from config import MY_GROUP_LINK
 from playwright.async_api import TimeoutError as PWTimeout
 
 from watcher import open_chat
@@ -41,7 +41,7 @@ async def send_text_message(page, target_chat: str, text: str, target_group: str
         await page.wait_for_timeout(80)  # ⚡ Reduzido de 100ms
 
         # Adiciona link do grupo no final da mensagem
-        group_link = GROUP_LINKS.get(target_group, "")  # Pega o link correto do target group
+        group_link = MY_GROUP_LINK  # Pega o link correto do target group
         if group_link:
             full_text = f"{text}\n\n☑️ Link do grupo: {group_link}"
         else:
@@ -108,7 +108,7 @@ async def send_image_with_caption(
             await page.wait_for_timeout(1500)
 
             # Adiciona link do grupo no final da legenda
-            group_link = GROUP_LINKS.get(target_group, "")  # Pega o link correto do target group
+            group_link = MY_GROUP_LINK  # Pega o link correto do target group
             if group_link:
                 full_caption = f"{caption}\n\n☑️ Link do grupo: {group_link}"
             else:
