@@ -5,16 +5,11 @@
 # ====================================
 # Formato: (Source Group, Target Group, Descrição)
 CHANNEL_PAIRS = [ 
-    ("Tech Deals 🎯 [01]", "Testes", "Teste de Funcionalidades"),
-    ("Home Deals [12]", "Testes", "Teste de Funcionalidades"),
     ("Rafa Shop", "Testes", "Teste de Funcionalidades"),
-    ("Guerra Deals Fit [112]", "Testes", "Teste de Funcionalidades"),
-    ("Guerra Deals Fit [73]", "Testes", "Teste de Funcionalidades"),
-    ("Parfum Deals 👔 [11]", "Testes", "Teste de Funcionalidades")
 ]
 
 # Tag de afiliado Mercado Livre (CORRETA)
-MELI_AFFILIATE_TAG = "np20241006154502"
+MELI_AFFILIATE_TAG = "silvagabriel20230920180155"
 
 # Pasta para downloads
 DOWNLOAD_DIR = "./tmp"
@@ -23,7 +18,7 @@ DOWNLOAD_DIR = "./tmp"
 POLL_SECONDS = 10
 
 # Chrome profile - Gabriel Cardoso (CORRETO)
-CHROME_USER_DATA_DIR = r"C:\BotChromeProfile"
+CHROME_USER_DATA_DIR = r"C:\Users\GABRIEL.CARDOSO\AppData\Local\BotChromeProfile"
 CHROME_PROFILE_DIR_NAME = "Default"
 
 # Modo headless (True = invisível, False = visível)

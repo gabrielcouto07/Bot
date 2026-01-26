@@ -24,9 +24,11 @@ tmp/
 state_last_seen.txt
 ml_affiliate_network_dump.json
 
-# Perfil do Chrome/navegador
+# 🔒 CRÍTICO: Perfil do Chrome/navegador (dados de sessão + cookies)
 BotChromeProfile/
-*.crx
+**/BotChromeProfile/
+*.chrome-profile/
+*.profile/
 
 # IDE
 .vscode/
