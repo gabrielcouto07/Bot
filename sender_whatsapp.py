@@ -1,11 +1,8 @@
-# sender_whatsapp.py - VERSÃO CORRIGIDA COM ANEXO REFORÇADO
+# sender_whatsapp.py - VERSÃO QUE FUNCIONAVA (RECUPERADA)
 
 import asyncio
 from pathlib import Path
-
-from config import MY_GROUP_LINK
-from playwright.async_api import TimeoutError as PWTimeout
-
+from config import GROUP_LINK
 from watcher import open_chat
 
 
@@ -15,68 +12,73 @@ async def _wait_message_box(page):
         page.locator("footer div[contenteditable='true'][role='textbox']").last,
         page.locator("div[contenteditable='true'][data-tab='10']").last,
     ]
-
+    
     for loc in candidates:
         try:
             await loc.wait_for(state="visible", timeout=15000)
             return loc
         except Exception:
             continue
-
+    
     raise RuntimeError("Não achei a caixa de mensagem do WhatsApp.")
 
 
-async def send_text_message(page, target_chat: str, text: str, target_group: str = None, skip_open_chat: bool = False) -> bool:
+async def send_text_message(
+    page,
+    target_chat: str,
+    text: str,
+    target_group: str = None,
+    skip_open_chat: bool = False
+) -> bool:
     """Envia texto COM formatação (*negrito*, emojis)"""
     try:
         if not skip_open_chat:
             await open_chat(page, target_chat)
-
+        
         box = await _wait_message_box(page)
         await box.click()
-        await page.wait_for_timeout(200)  # ⚡ Reduzido de 300ms
-
+        await page.wait_for_timeout(200)
+        
         await box.press("Control+A")
         await box.press("Backspace")
-        await page.wait_for_timeout(80)  # ⚡ Reduzido de 100ms
-
+        await page.wait_for_timeout(80)
+        
         # Adiciona link do grupo no final da mensagem
-        group_link = MY_GROUP_LINK  # Pega o link correto do target group
-        if group_link:
-            full_text = f"{text}\n\n☑️ Link do grupo: {group_link}"
+        if GROUP_LINK:
+            full_text = f"{text}\n\n☑️ Link do grupo: {GROUP_LINK}"
         else:
             full_text = text
         
         lines = full_text.split("\n")
         for i, line in enumerate(lines):
             if line:
-                await box.type(line, delay=2)  # ⚡ Reduzido de 10 para 2ms
+                await box.type(line, delay=2)
             if i < len(lines) - 1:
                 await box.press("Shift+Enter")
-                await page.wait_for_timeout(15)  # ⚡ Reduzido de 30ms
-
-        await page.wait_for_timeout(100)  # ⚡ Reduzido de 200ms
+                await page.wait_for_timeout(15)
+        
+        await page.wait_for_timeout(100)
         await page.keyboard.press("Enter")
-        await page.wait_for_timeout(500)  # ⚡ Reduzido de 700ms
-
+        await page.wait_for_timeout(500)
+        
         return True
-
+    
     except Exception as e:
         print(f"✗ Falha ao enviar texto: {e}")
         return False
 
 
-async def _type_with_line_breaks(locator_or_page, text: str, delay: int = 5):  # ⚡ Reduzido de 10
-    """Digita texto convertendo \\n em Shift+Enter"""
+async def _type_with_line_breaks(locator_or_page, text: str, delay: int = 5):
+    """Digita texto convertendo \n em Shift+Enter"""
     lines = text.split("\n")
-
+    
     for i, line in enumerate(lines):
         if line:
             await locator_or_page.type(line, delay=delay)
         if i < len(lines) - 1:
             await locator_or_page.press("Shift+Enter")
             if hasattr(locator_or_page, "page"):
-                await locator_or_page.page.wait_for_timeout(25)  # ⚡ Reduzido de 50ms
+                await locator_or_page.page.wait_for_timeout(25)
             else:
                 await asyncio.sleep(0.025)
 
@@ -91,29 +93,29 @@ async def send_image_with_caption(
     max_retries: int = 3,
 ) -> bool:
     """
-    🔥 Imagem + Legenda em 1 bolha - VERSÃO REFORÇADA
+    🔥 Imagem + Legenda em 1 bolha - VERSÃO QUE FUNCIONAVA ONTEM
     """
+    
     for attempt in range(max_retries):
         try:
             if not image_path or not Path(image_path).exists():
                 print(f"✗ Arquivo não existe: {image_path}")
                 return False
-
+            
             img = Path(image_path).resolve()
             print(f"\n🔥 [{attempt+1}/{max_retries}] Enviando imagem + legenda")
             print(f" → {img.name}")
             print(f" → {len(caption)} chars ({caption.count(chr(10))} quebras)")
-
+            
             await open_chat(page, target_chat)
             await page.wait_for_timeout(1500)
-
+            
             # Adiciona link do grupo no final da legenda
-            group_link = MY_GROUP_LINK  # Pega o link correto do target group
-            if group_link:
-                full_caption = f"{caption}\n\n☑️ Link do grupo: {group_link}"
+            if GROUP_LINK:
+                full_caption = f"{caption}\n\n☑️ Link do grupo: {GROUP_LINK}"
             else:
                 full_caption = caption
-
+            
             # ============================================
             # [1/4] CLICAR NO BOTÃO ANEXAR (REFORÇADO)
             # ============================================
@@ -130,7 +132,6 @@ async def send_image_with_caption(
             ]
             
             attach_clicked = False
-            
             for sel in attach_selectors:
                 try:
                     attach = page.locator(sel).first
@@ -146,9 +147,9 @@ async def send_image_with_caption(
             if not attach_clicked:
                 print(" ✗ Botão Anexar não encontrado!")
                 raise RuntimeError("Botão Anexar não encontrado")
-
+            
             # ============================================
-            # [2/4] CLICAR EM "FOTOS E VÍDEOS" (REFORÇADO)
+            # [2/4] CLICAR EM "FOTOS E VÍDEOS" + UPLOAD (MÉTODO QUE FUNCIONAVA)
             # ============================================
             print(" [2/4] Procurando 'Fotos e vídeos'...")
             
@@ -165,10 +166,9 @@ async def send_image_with_caption(
             ]
             
             photo_clicked = False
-            
             for sel in photo_selectors:
                 try:
-                    # Verifica se é input file
+                    # ✅ SE FOR INPUT FILE, USA DIRETO
                     if 'input[accept' in sel:
                         file_input = page.locator(sel).first
                         if await file_input.count() > 0:
@@ -177,9 +177,8 @@ async def send_image_with_caption(
                             photo_clicked = True
                             break
                     else:
-                        # Botão normal
+                        # ✅ MÉTODO QUE FUNCIONAVA: expect_file_chooser
                         elem = page.locator(sel).first
-                        
                         if await elem.count() == 0:
                             continue
                         
@@ -191,25 +190,26 @@ async def send_image_with_caption(
                         except Exception:
                             pass
                         
-                        # Tenta clicar e pegar o file chooser
+                        # ✅ CLICA E CAPTURA FILE CHOOSER
                         try:
                             async with page.expect_file_chooser(timeout=5000) as fc:
                                 await elem.click(timeout=2000)
-                            file_chooser = await fc.value
-                            await file_chooser.set_files(str(img))
+                                file_chooser = await fc.value
+                                await file_chooser.set_files(str(img))
+                            
                             print(f" ✓ Upload via file chooser ({sel})")
                             photo_clicked = True
                             break
                         except Exception:
                             continue
-                            
+                
                 except Exception as e:
                     continue
             
             if not photo_clicked:
                 print(" ✗ 'Fotos e vídeos' não encontrado!")
                 raise RuntimeError("Botão 'Fotos e vídeos' não encontrado")
-
+            
             # ============================================
             # [3/4] INSERIR LEGENDA COM QUEBRAS DE LINHA
             # ============================================
@@ -224,6 +224,7 @@ async def send_image_with_caption(
                 fields = await page.locator('[contenteditable="true"]').all()
                 print(f" → Encontrados {len(fields)} campos editáveis")
                 
+                # Testa os últimos 5 campos (do fim para o início)
                 for i in range(len(fields) - 1, max(0, len(fields) - 5), -1):
                     field = fields[i]
                     
@@ -241,6 +242,7 @@ async def send_image_with_caption(
                         await field.click(timeout=2000)
                         await page.wait_for_timeout(300)
                         
+                        # Limpa campo
                         try:
                             await field.press("Control+A", timeout=500)
                             await field.press("Backspace", timeout=500)
@@ -248,9 +250,11 @@ async def send_image_with_caption(
                         except Exception:
                             pass
                         
+                        # Digita legenda
                         await _type_with_line_breaks(field, full_caption, delay=10)
                         await page.wait_for_timeout(1000)
                         
+                        # Verifica se funcionou
                         text_check = await field.inner_text()
                         text_len = len(text_check.strip())
                         
@@ -261,14 +265,15 @@ async def send_image_with_caption(
                             break
                         else:
                             print(f" ⊗ Campo #{i} vazio após digitação")
-                            
+                    
                     except Exception as e:
                         print(f" ⊗ Campo #{i} erro: {str(e)[:40]}")
                         continue
-                        
+            
             except Exception as e:
                 print(f" ⚠️ Erro ao buscar campos: {e}")
             
+            # Fallback: keyboard global
             if not caption_inserted:
                 print(" → Tentando keyboard global...")
                 try:
@@ -283,13 +288,12 @@ async def send_image_with_caption(
                     await page.wait_for_timeout(1000)
                     print(" ✓ Legenda digitada via keyboard")
                     caption_inserted = True
-                    
                 except Exception as e:
                     print(f" ⚠️ Keyboard falhou: {e}")
             
             if not caption_inserted:
                 raise RuntimeError("Não conseguiu inserir legenda")
-
+            
             # ============================================
             # [4/4] ENVIAR
             # ============================================
@@ -299,7 +303,7 @@ async def send_image_with_caption(
             
             sent = False
             
-            # Tenta Enter no campo
+            # Método 1: Enter no campo
             if caption_field_used:
                 try:
                     await caption_field_used.press("Enter")
@@ -309,7 +313,7 @@ async def send_image_with_caption(
                 except Exception as e:
                     print(f" ⚠️ Enter no campo falhou: {e}")
             
-            # Tenta Enter global
+            # Método 2: Enter global
             if not sent:
                 try:
                     await page.keyboard.press("Enter")
@@ -319,7 +323,7 @@ async def send_image_with_caption(
                 except Exception as e:
                     print(f" ⚠️ Enter global falhou: {e}")
             
-            # Tenta clicar no botão Send
+            # Método 3: Botão Send
             if not sent:
                 try:
                     send = page.locator('span[data-icon="send"]').last
@@ -335,13 +339,13 @@ async def send_image_with_caption(
             
             print("\n ✅✅✅ SUCESSO: Imagem + Legenda enviada!\n")
             return True
-            
+        
         except Exception as e:
             print(f"\n ❌ Tentativa {attempt+1} falhou: {str(e)[:150]}\n")
             
             # Cancela anexo com ESC
             try:
-                for _ in range(5):
+                for _ in range(10):
                     await page.keyboard.press("Escape")
                     await page.wait_for_timeout(300)
             except Exception:

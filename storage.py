@@ -6,7 +6,7 @@ import os
 STATE_FILE = "state_last_seen.txt"
 
 
-def load_last_seen(group_name: str) -> str:
+def get_last_seen(group_name: str) -> str:
     """
     Carrega o último ID de mensagem visto de um grupo específico.
     Retorna: ID da última mensagem ou string vazia se não existir.

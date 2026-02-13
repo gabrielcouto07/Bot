@@ -1,12 +1,13 @@
-# affiliate.py - VERSÃO CORRIGIDA COM LOCK
-
 import asyncio
 import json
 import re
 from pathlib import Path
-
+from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
 from playwright.async_api import TimeoutError as PWTimeout
 
+# ==============================================================================
+# CONFIGURAÇÕES E CONSTANTES - MERCADO LIVRE
+# ==============================================================================
 API_CREATE_LINK = (
     "https://www.mercadolivre.com.br/affiliate-program/api/v2/stripe/user/links"
 )
@@ -16,10 +17,38 @@ ML_SEC_RE = re.compile(
     re.IGNORECASE,
 )
 
-# 🔥 FIX: Cache de CSRF com Lock para evitar race condition
+# Cache de CSRF com Lock para evitar race condition no ML
 _CACHED_CSRF: str | None = None
 _CSRF_LOCK = asyncio.Lock()
 
+
+def clear_csrf_cache():
+    """Limpa cache de CSRF (chamado ao rotacionar perfil ML)."""
+    global _CACHED_CSRF
+    _CACHED_CSRF = None
+
+# ==============================================================================
+# CONFIGURAÇÕES E CONSTANTES - AMAZON
+# ==============================================================================
+ASIN_RE_LIST = [
+    re.compile(r"/dp/([A-Z0-9]{10})(?:[/?]|$)", re.IGNORECASE),
+    re.compile(r"/gp/product/([A-Z0-9]{10})(?:[/?]|$)", re.IGNORECASE),
+    re.compile(r"/product/([A-Z0-9]{10})(?:[/?]|$)", re.IGNORECASE),
+    re.compile(r"/ASIN/([A-Z0-9]{10})(?:[/?]|$)", re.IGNORECASE),
+    re.compile(r"/exec/obidos/ASIN/([A-Z0-9]{10})(?:[/?]|$)", re.IGNORECASE),
+]
+
+AMAZON_RE = re.compile(
+    r"https?://(?:(?:www|m|smile)\.)?(?:amazon\.[a-z.]{2,}|amzn\.to)/[^\s]+",
+    re.IGNORECASE,
+)
+
+AMZN_SHORT_RE = re.compile(r"https?://(?:amzn\.to)/", re.IGNORECASE)
+
+
+# ==============================================================================
+# HELPERS - MERCADO LIVRE
+# ==============================================================================
 
 def _is_sec(url: str) -> bool:
     return bool(ML_SEC_RE.search((url or "").strip()))
@@ -76,7 +105,7 @@ async def _ensure_csrf_token_from_affiliates(page) -> str | None:
         try:
             current_url = page.url
             print(
-                f" → Navegando para página de afiliados (URL atual: {current_url[:60]}...)..."
+                f" → Navegando para página de afiliados ML (URL atual: {current_url[:60]}...)..."
             )
 
             await page.goto(
@@ -193,7 +222,7 @@ async def _create_sec_via_api(page, product_url: str, tag: str) -> str | None:
 
     payload = {"url": product_url, "tag": tag}
 
-    print(" → Chamando API de afiliados...")
+    print(" → Chamando API de afiliados ML...")
 
     try:
         resp = await page.context.request.post(
@@ -246,12 +275,86 @@ async def _create_sec_via_api(page, product_url: str, tag: str) -> str | None:
     return new_sec
 
 
+# ==============================================================================
+# HELPERS - AMAZON
+# ==============================================================================
+
+def _extract_asin_from_url(u: str) -> str | None:
+    if not u:
+        return None
+    for rgx in ASIN_RE_LIST:
+        m = rgx.search(u)
+        if m:
+            return m.group(1).upper()
+    return None
+
+
+async def _extract_asin_from_page_dom(page) -> str | None:
+    """
+    Fallback quando a Amazon não deixa o ASIN claro no URL.
+    Tenta pegar no HTML: inputs/meta/dados estruturados.
+    """
+    try:
+        asin = await page.evaluate(
+            """
+            () => {
+              // 1) input hidden comum
+              const i = document.querySelector('input#ASIN, input[name="ASIN"]');
+              if (i && i.value && i.value.length === 10) return i.value;
+
+              // 2) data-asin em alguns templates
+              const el = document.querySelector('[data-asin]');
+              if (el && el.getAttribute('data-asin') && el.getAttribute('data-asin').length === 10)
+                return el.getAttribute('data-asin');
+
+              // 3) meta tag às vezes aparece
+              const meta = document.querySelector('meta[name="ASIN"]');
+              if (meta && meta.content && meta.content.length === 10) return meta.content;
+
+              // 4) procura por "ASIN":"XXXXXXXXXX" no HTML
+              const html = document.documentElement ? document.documentElement.innerHTML : '';
+              const m = html.match(/"ASIN"\\s*:\\s*"([A-Z0-9]{10})"/i);
+              return m ? m[1] : null;
+            }
+            """
+        )
+        if asin and isinstance(asin, str) and len(asin) == 10:
+            return asin.upper()
+    except Exception:
+        pass
+    return None
+
+
+def _build_canonical_amazon_url(netloc: str, asin: str, tag: str) -> str:
+    # canônico padrão
+    base = f"https://{netloc}/dp/{asin}/"
+    return f"{base}?{urlencode({'tag': tag})}"
+
+
+def _fallback_replace_tag(original_url: str, tag: str) -> str:
+    """
+    Se falhar ASIN, pelo menos substitui/adiciona tag no query.
+    """
+    parsed = urlparse(original_url)
+    q = parse_qs(parsed.query)
+    q["tag"] = [tag]
+    # limpa lixo comum
+    for k in ["ref", "ref_", "pf_rd_r", "pf_rd_p", "pd_rd_r", "pd_rd_w", "qid", "sr", "sprefix", "keywords"]:
+        q.pop(k, None)
+    new_query = urlencode(q, doseq=True)
+    return urlunparse(parsed._replace(query=new_query))
+
+
+# ==============================================================================
+# FUNÇÕES PRINCIPAIS DE GERAÇÃO
+# ==============================================================================
+
 async def generate_affiliate_link(
     page_m, any_url: str, tag: str, max_retries: int = 2
 ) -> tuple[str | None, str | None]:
     """
-    🔥 RETORNA: (link_afiliado, product_url)
-    Com retry automático em caso de falha
+    🔥 (MERCADO LIVRE)
+    RETORNA: (link_afiliado, product_url)
     """
     any_url = (any_url or "").strip()
     if not any_url:
@@ -259,13 +362,13 @@ async def generate_affiliate_link(
 
     tag = (tag or "").strip()
     if not tag:
-        print(" ✗ Tag do afiliado vazia")
+        print(" ✗ Tag do afiliado ML vazia")
         return None, None
 
     for attempt in range(max_retries):
         try:
             print(
-                f"\n 🔄 Gerando link afiliado (tentativa {attempt+1}/{max_retries})"
+                f"\n 🔄 [ML] Gerando link afiliado (tentativa {attempt+1}/{max_retries})"
             )
 
             product_url = await _resolve_product_url(page_m, any_url)
@@ -280,7 +383,7 @@ async def generate_affiliate_link(
             sec = await _create_sec_via_api(page_m, product_url, tag)
 
             if sec:
-                print(f" ✅ Link afiliado gerado com sucesso: {sec}")
+                print(f" ✅ Link afiliado ML gerado: {sec}")
 
                 try:
                     await page_m.goto(
@@ -296,19 +399,17 @@ async def generate_affiliate_link(
                 return sec, product_url
 
             else:
-                print(" ✗ API não conseguiu gerar link afiliado")
+                print(" ✗ API ML não conseguiu gerar link")
 
                 if attempt < max_retries - 1:
                     global _CACHED_CSRF
                     async with _CSRF_LOCK:
                         _CACHED_CSRF = None
-
                     await asyncio.sleep(3)
                     continue
 
         except Exception as e:
             print(f" ✗ Erro na tentativa {attempt+1}: {e}")
-
             if attempt < max_retries - 1:
                 await asyncio.sleep(3)
                 continue
@@ -316,32 +417,110 @@ async def generate_affiliate_link(
     return None, None
 
 
+async def generate_amazon_affiliate_link_async(
+    page_m, original_url: str, tag: str
+) -> tuple[str | None, str | None]:
+    """
+    🔥 (AMAZON)
+    Retorna (link_afiliado, product_url_resolvida)
+    - Resolve redirects (amzn.to etc)
+    - Extrai ASIN do URL final ou do DOM
+    - Reconstrói URL canônica /dp/ASIN?tag=...
+    """
+    original_url = (original_url or "").strip()
+    tag = (tag or "").strip()
+
+    if not original_url or not tag:
+        return None, None
+
+    print(f"\n 🔄 [AMAZON] Processando URL...")
+
+    # 1) tenta extrair ASIN direto
+    asin = _extract_asin_from_url(original_url)
+    parsed = urlparse(original_url)
+    netloc = parsed.netloc or "www.amazon.com.br"
+
+    # 2) se for amzn.to OU não achou ASIN, resolve navegando
+    resolved_url = original_url
+    if AMZN_SHORT_RE.search(original_url) or not asin:
+        try:
+            print(f" → Resolvendo redirect/URL final: {original_url[:80]}...")
+            await page_m.goto(original_url, wait_until="domcontentloaded", timeout=60000)
+            await page_m.wait_for_timeout(1500)
+
+            resolved_url = page_m.url
+            print(f" → URL resolvida: {resolved_url[:120]}")
+
+            asin = _extract_asin_from_url(resolved_url)
+            if not asin:
+                asin = await _extract_asin_from_page_dom(page_m)
+
+            p2 = urlparse(resolved_url)
+            if p2.netloc:
+                netloc = p2.netloc
+
+        except Exception as e:
+            print(f" ⚠️ Falha ao resolver no navegador: {e}")
+
+    # 3) se achou ASIN, monta canônico
+    if asin:
+        affiliate = _build_canonical_amazon_url(netloc, asin, tag)
+        print(f" ✅ [AMAZON] ASIN={asin} | Link: {affiliate[:100]}...")
+        return affiliate, resolved_url
+
+    # 4) fallback: troca tag no query (melhor que nada)
+    try:
+        affiliate = _fallback_replace_tag(resolved_url, tag)
+        print(f" ⚠️ [AMAZON] Sem ASIN, usando fallback tag-query: {affiliate[:100]}...")
+        return affiliate, resolved_url
+    except Exception as e:
+        print(f" ✗ [AMAZON] Falha total ao gerar link: {e}")
+        return None, resolved_url
+
+
+# ==============================================================================
+# DOWNLOAD DE IMAGEM (UNIFICADO)
+# ==============================================================================
+
 async def download_product_image(
     page, product_url: str, out_dir: str = "./tmp"
 ) -> str | None:
     """
-    🔥 Baixa imagem FORÇANDO formato JPEG (não PNG)
-    Isso evita que WhatsApp converta em sticker
+    🔥 Baixa imagem FORÇANDO formato JPEG.
+    Tenta seletores do Mercado Livre E da Amazon.
     """
     try:
-        print(" → Baixando imagem do produto ML...")
+        print(" → Baixando imagem do produto...")
 
         current = page.url
-        if product_url not in current:
-            await page.goto(
-                product_url,
-                wait_until="domcontentloaded",
-                timeout=30000,
-            )
-            await page.wait_for_timeout(2000)
+        # Pequena margem de erro para URLs que variam query params
+        if product_url.split("?")[0] not in current:
+            try:
+                await page.goto(
+                    product_url,
+                    wait_until="domcontentloaded",
+                    timeout=30000,
+                )
+                await page.wait_for_timeout(2000)
+            except Exception:
+                pass
 
+        # Lista unificada de seletores
         img_selectors = [
+            # --- Mercado Livre ---
             "figure.ui-pdp-gallery__figure img[src^='http']",
             "img.ui-pdp-image[src^='http']",
             "div.ui-pdp-gallery img[src^='http']",
             "img[src*='mlb-s1']",
             "img[src*='mlb-s2']",
             "img[src*='mlb-s3']",
+            # --- Amazon ---
+            "#landingImage",            # Padrão produtos físicos
+            "#imgBlkFront",             # Livros físicos
+            "#ebooksImgBlkFront",       # Kindle
+            "#main-image",              # Genérico antigo
+            "img[data-a-image-name='landingImage']",
+            "#kby-start-reading-image",
         ]
 
         img_element = None
@@ -349,7 +528,7 @@ async def download_product_image(
         for selector in img_selectors:
             try:
                 elem = page.locator(selector).first
-                if await elem.count() > 0:
+                if await elem.count() > 0 and await elem.is_visible():
                     img_element = elem
                     print(f" ✓ Imagem encontrada: {selector}")
                     break
@@ -357,7 +536,7 @@ async def download_product_image(
                 continue
 
         if not img_element:
-            print(" ✗ Não encontrei imagem do produto")
+            print(" ✗ Não encontrei imagem do produto (ML/Amazon)")
             return None
 
         Path(out_dir).mkdir(parents=True, exist_ok=True)

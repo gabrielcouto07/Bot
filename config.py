@@ -1,58 +1,76 @@
-# config.py
-# ⚠️ IMPORTANTE: Este é o template padrão com valores de exemplo.
-# Para usar o bot, edite config.example.py com seus dados reais.
-# config.example.py é ignorado pelo Git para proteger dados sensíveis.
+import os
 
-# ====================================
-# 🔥 ROUND-ROBIN 3x3 (Source → Target)
-# ====================================
-# Formato: (Source Group, Target Group, Descrição)
-CHANNEL_PAIRS = [ 
-    ("Tech Deals 🎯 [01]", "Promo Codes🛒🔥 - Promoções e Cupons", "Teste de Funcionalidades"),
-    ("Home Deals [12]", "Promo Codes🛒🔥 - Promoções e Cupons", "Teste de Funcionalidades"),
-    ("Rafa Shop", "Promo Codes🛒🔥 - Promoções e Cupons", "Teste de Funcionalidades"),
-    ("Parfum Deals 👔 [11]", "Promo Codes🛒🔥 - Promoções e Cupons", "Teste de Funcionalidades"),
-    ("Guerra Deals Fit [112]", "Promo Codes🛒🔥 - Promoções e Cupons", "Teste de Funcionalidades"),
-    ("Tech Promos", "Promo Codes🛒🔥 - Promoções e Cupons", "Teste de Funcionalidades"),
-    ("Guerra Deals Fit [73]", "Promo Codes🛒🔥 - Promoções e Cupons", "Teste de Funcionalidades"),
-    ("Super Promos", "Promo Codes🛒🔥 - Promoções e Cupons", "Teste de Funcionalidades"),
-]
-
-# Tag de afiliado Mercado Livre
-MELI_AFFILIATE_TAG = "np20241006154502"
-
-# Pasta para downloads
-DOWNLOAD_DIR = "./tmp"
-
-# Segundos entre verificações de cada grupo
-POLL_SECONDS = 10
-
-# Chrome profile - Substitua pelo seu caminho
-CHROME_USER_DATA_DIR = r"C:\Users\pedronunees\AppData\Local\BotChromeProfile"
+CHROME_USER_DATA_DIR = "C:\\BotChromeProfile"
 CHROME_PROFILE_DIR_NAME = "Default"
+HEADLESS = True
 
-# Modo headless (True = invisível, False = visível)
-HEADLESS = False
+DOWNLOAD_DIR = "./tmp"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ====================================
-# 🔥 GATILHOS E EMOJI
-# ====================================
-# Emoji a ser removido das mensagens
+MELI_AFFILIATE_TAG = "silvagabriel20230920180155"
+AMAZON_AFFILIATE_TAG = "superprom03bb-20"
+
+AMAZON_ENABLED = True
+
+# Perfis ML para rotacao multi-conta
+ML_PROFILES = [
+    {
+        "name": "ML1",
+        "user_data_dir": "C:\\BotChromeProfile",
+        "profile_dir_name": "Default",
+        "affiliate_tag": "silvagabriel20230920180155",
+        "uses_main_context": True,
+    },
+    {
+        "name": "ML2",
+        "user_data_dir": "C:\\BotChrome1",
+        "profile_dir_name": "Default",
+        "affiliate_tag": "arthurothero",
+        "uses_main_context": False,
+    },
+    {
+        "name": "ML3",
+        "user_data_dir": "C:\\BotChrome2",
+        "profile_dir_name": "Default",
+        "affiliate_tag": "np20241006154502",
+        "uses_main_context": False,
+    },
+]
+ML_ROTATION_MINUTES = 30
+
 SUPERHERO_EMOJI = "🦸"
 
-# Gatilhos aleatórios (20% de chance)
 GATILHOS = [
-    "🔥 CORRA!",
-    "⚡ OFERTA IMPERDÍVEL!",
-    "💥 NESSE PREÇO NUNCA!",
-    "🎯 APROVEITA!",
-    "⚡ ÚLTIMA UNIDADE!",
-    "💰 PREÇO DE LOUCO!",
-    "🚨 PROMOÇÃO RELÂMPAGO!",
+    "⚡ CORRE!",
+    "🔥 OFERTA IMPERDÍVEL!",
+    "💰 PREÇO NUNCA VISTO!",
+    "⏰ ÚLTIMAS UNIDADES!",
+    "🎯 NESSE PREÇO NUNCA!",
+    "💥 ACABANDO!",
 ]
-
-# Chance de adicionar gatilho (0.0 a 1.0)
 GATILHO_CHANCE = 0.20
 
-# Link do grupo WhatsApp para adicionar nas mensagens
-MY_GROUP_LINK = "https://chat.whatsapp.com/GCLG0St2zFqDJvC51o5V5X"
+BUBBLE_REFRESH_DELAY = 2
+
+POLL_SECONDS = 180
+
+RESTART_EVERY_CYCLES = 25
+
+CYCLE_TIMEOUT_SECONDS = 240
+
+SLEEP_GRANULARITY_SECONDS = 60
+
+LOG_CLEANUP_CYCLES = 50 
+
+NIGHT_MODE_ENABLED = True
+NIGHT_START_HOUR = 1
+NIGHT_END_HOUR = 8
+
+CHANNEL_PAIRS = [
+    ("Herói da Promo #731", "Super Promos [21]", "Herói da Promo"),
+    ("Home Deals [12]", "Super Promos [21]", "Home Deals"),
+    ("Tech Deals 🎯 [20]", "Super Promos [21]", "Tech Deals"),
+    ("Parfum Deals 👔 [15]", "Super Promos [21]", "Parfum Deals"),
+]
+
+GROUP_LINK = "https://chat.whatsapp.com/Hd8UFqVrs1dGxdhq477syJ"

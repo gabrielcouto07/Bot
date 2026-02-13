@@ -1,57 +1,65 @@
+# Sensíveis
+.env
+*.env
+.env.*
+credentials.json
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-
-# Ambientes virtuais
-.venv/
+build/
+dist/
+*.egg-info/
 venv/
 ENV/
 env/
+.venv/
 
 # Logs
-logs/
 *.log
+logs/
+bot_*.log
 
-# Arquivos temporários
+# Temporários
+*.png
+*.jpg
+*.jpeg
+*.gif
+temp/
 tmp/
+downloads/
 *.tmp
-*.temp
+*.bak
 
-# Estado e cache do bot
+# Chrome/Playwright
+chrome_data/
+user_data/
+BotChromeProfile/
+.playwright/
+
+# Estado/Cache
 state_last_seen.txt
+state_*.txt
+*.db
+*.sqlite
+
+# JSON grandes
+*.json
+!package.json
 ml_affiliate_network_dump.json
 
-# 🔒 CRÍTICO: Perfil do Chrome/navegador (dados de sessão + cookies)
-BotChromeProfile/
-**/BotChromeProfile/
-*.chrome-profile/
-*.profile/
-
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
-*.swo
-*~
 
-# Sistema operacional
+# OS
 .DS_Store
 Thumbs.db
-desktop.ini
+Desktop.ini
 
-# Credenciais e configurações sensíveis
-.env
-config_example.py
-*.key
-*.pem
-credentials.json
-
-# Imagens baixadas
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.webp
+# Node (se tiver)
+node_modules/
